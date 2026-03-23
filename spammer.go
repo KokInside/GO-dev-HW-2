@@ -27,18 +27,21 @@ func RunPipeline(cmds ...cmd) {
 	}
 
 	wg.Wait()
+
+	if len(chans) != 0 {
+		close(chans[0])
+	}
 }
 
 func SelectUsers(in, out chan interface{}) {
-	selectedUsers := make(map[string]bool)
+	selectedUsers := make(map[uint64]bool)
 	wg := sync.WaitGroup{}
 	mu := sync.RWMutex{}
 
 	for emailItf := range in {
-		email := emailItf.(string)
-
-		if usersAliases[email] != "" {
-			email = usersAliases[email]
+		email, ok := emailItf.(string)
+		if !ok {
+			continue
 		}
 
 		wg.Add(1)
@@ -46,14 +49,14 @@ func SelectUsers(in, out chan interface{}) {
 			defer wg.Done()
 			user := GetUser(email)
 
-			mu.RLock()
-			alreadySelected := selectedUsers[user.Email]
-			mu.RUnlock()
+			mu.Lock()
+			alreadySelected := selectedUsers[user.ID]
+			mu.Unlock()
 
-			if alreadySelected == false {
+			if !alreadySelected {
 				out <- user
 				mu.Lock()
-				selectedUsers[user.Email] = true
+				selectedUsers[user.ID] = true
 				mu.Unlock()
 			}
 		}(&wg, &mu)
@@ -66,18 +69,28 @@ func SelectMessages(in, out chan interface{}) {
 	wg := sync.WaitGroup{}
 
 	for {
-		userItf, ok := <-in
 		userSlice := make([]User, 0, 2)
 
+		user1Itf, ok := <-in
 		if ok {
-			userSlice = append(userSlice, userItf.(User))
+			user1, ok1 := user1Itf.(User)
+			if !ok1 {
+				continue
+			}
+
+			userSlice = append(userSlice, user1)
 		} else {
 			break
 		}
 
 		user2Itf, ok := <-in
 		if ok {
-			userSlice = append(userSlice, user2Itf.(User))
+			user2, ok2 := user2Itf.(User)
+			if !ok2 {
+				continue
+			}
+
+			userSlice = append(userSlice, user2)
 		}
 
 		wg.Add(1)
@@ -109,7 +122,11 @@ func CheckSpam(in, out chan interface{}) {
 	for idItf := range in {
 		queue <- 1
 
-		id := idItf.(MsgID)
+		id, ok := idItf.(MsgID)
+		if !ok {
+			continue
+		}
+
 		wg.Add(1)
 		go func(w *sync.WaitGroup) {
 			defer w.Done()
@@ -131,7 +148,11 @@ func CombineResults(in, out chan interface{}) {
 	var datas []MsgData
 
 	for dataItf := range in {
-		data := dataItf.(MsgData)
+		data, ok := dataItf.(MsgData)
+		if !ok {
+			continue
+		}
+
 		datas = append(datas, data)
 	}
 
@@ -139,7 +160,7 @@ func CombineResults(in, out chan interface{}) {
 		if a.HasSpam == b.HasSpam {
 			return cmp.Compare(a.ID, b.ID)
 		}
-		if a.HasSpam == true {
+		if a.HasSpam {
 			return -1
 		}
 		return 1
