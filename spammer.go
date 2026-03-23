@@ -51,14 +51,12 @@ func SelectUsers(in, out chan interface{}) {
 
 			mu.Lock()
 			alreadySelected := selectedUsers[user.ID]
-			mu.Unlock()
 
 			if !alreadySelected {
 				out <- user
-				mu.Lock()
 				selectedUsers[user.ID] = true
-				mu.Unlock()
 			}
+			mu.Unlock()
 		}(&wg, &mu)
 	}
 
