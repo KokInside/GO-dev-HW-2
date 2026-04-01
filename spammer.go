@@ -50,13 +50,14 @@ func SelectUsers(in, out chan interface{}) {
 			user := GetUser(email)
 
 			mu.Lock()
-			alreadySelected := selectedUsers[user.ID]
-
-			if !alreadySelected {
-				out <- user
+			_, exists := selectedUsers[user.ID]
+			if !exists {
 				selectedUsers[user.ID] = true
+				mu.Unlock()
+				out <- user
+			} else {
+				mu.Unlock()
 			}
-			mu.Unlock()
 		}(&wg, &mu)
 	}
 
@@ -67,19 +68,19 @@ func SelectMessages(in, out chan interface{}) {
 	wg := sync.WaitGroup{}
 
 	for {
-		userSlice := make([]User, 0, 2)
+		userSlice := make([]User, 0, GetMessagesMaxUsersBatch)
 
 		user1Itf, ok := <-in
-		if ok {
-			user1, ok1 := user1Itf.(User)
-			if !ok1 {
-				continue
-			}
-
-			userSlice = append(userSlice, user1)
-		} else {
+		if !ok {
 			break
 		}
+
+		user1, ok1 := user1Itf.(User)
+		if !ok1 {
+			continue
+		}
+
+		userSlice = append(userSlice, user1)
 
 		user2Itf, ok := <-in
 		if ok {
@@ -97,7 +98,23 @@ func SelectMessages(in, out chan interface{}) {
 
 			MsgID, err := GetMessages(userSlice...)
 			if err != nil {
-				return
+				// Может быть только ошибка "to many users"
+				// Значит разбиваем userSlice на GetMessagesMaxUsersBatch(2)
+				// GO 1.23+
+				for users := range slices.Chunk(userSlice, GetMessagesMaxUsersBatch) {
+
+					wg.Add(1)
+					go func(wg *sync.WaitGroup) {
+						defer wg.Done()
+
+						// Ошибка не может быть получена
+						msgID, _ := GetMessages(users...)
+
+						for _, id := range msgID {
+							out <- id
+						}
+					}(wg)
+				}
 			}
 
 			for _, id := range MsgID {
@@ -114,12 +131,10 @@ func SelectMessages(in, out chan interface{}) {
 }
 
 func CheckSpam(in, out chan interface{}) {
-	queue := make(chan int, 5)
+	queue := make(chan int, HasSpamMaxAsyncRequests)
 	wg := sync.WaitGroup{}
 
 	for idItf := range in {
-		queue <- 1
-
 		id, ok := idItf.(MsgID)
 		if !ok {
 			continue
@@ -128,15 +143,16 @@ func CheckSpam(in, out chan interface{}) {
 		wg.Add(1)
 		go func(w *sync.WaitGroup) {
 			defer w.Done()
-			defer func() { <-queue }()
 
+			queue <- 1
 			res, err := HasSpam(id)
+			<-queue
+
 			if err != nil {
 				return
 			}
 
 			out <- MsgData{ID: id, HasSpam: res}
-
 		}(&wg)
 	}
 	wg.Wait()
