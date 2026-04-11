@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"log"
 	"slices"
 	"sync"
 )
@@ -98,23 +99,7 @@ func SelectMessages(in, out chan interface{}) {
 
 			MsgID, err := GetMessages(userSlice...)
 			if err != nil {
-				// Может быть только ошибка "to many users"
-				// Значит разбиваем userSlice на GetMessagesMaxUsersBatch(2)
-				// GO 1.23+
-				for users := range slices.Chunk(userSlice, GetMessagesMaxUsersBatch) {
-
-					wg.Add(1)
-					go func(wg *sync.WaitGroup) {
-						defer wg.Done()
-
-						// Ошибка не может быть получена
-						msgID, _ := GetMessages(users...)
-
-						for _, id := range msgID {
-							out <- id
-						}
-					}(wg)
-				}
+				log.Println(err)
 			}
 
 			for _, id := range MsgID {
