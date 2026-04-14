@@ -1,3 +1,9 @@
-# GO development HW1
+# GO development HW2
 
 ## pipeline
+
+Запуск тестов:
+
+```bash
+go test -v -race
+```
